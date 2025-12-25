@@ -13,6 +13,19 @@ const BASE_SYSTEM_PROMPT = `당신은 문화예술 AI 도슨트입니다. 오페
 
 항상 한국어로 대화하고, 전문 용어는 쉽게 풀어서 설명해주세요.`;
 
+interface ArticleWithMagazine {
+  id: number;
+  title: string;
+  subtitle: string | null;
+  content: string;
+  category: string;
+  author: string | null;
+  magazine: {
+    title: string;
+    issue: number;
+  } | null;
+}
+
 @Injectable()
 export class ChatService {
   private anthropic: Anthropic;
@@ -23,9 +36,8 @@ export class ChatService {
     });
   }
 
-  // RAG: 관련 콘텐츠 검색
+  // RAG: 키워드 기반 검색
   private async searchRelevantContent(query: string): Promise<string> {
-    // 키워드 추출 (간단한 방식: 공백으로 분리)
     const keywords = query
       .replace(/[?!.,。？！，．]/g, '')
       .split(/\s+/)
@@ -35,7 +47,6 @@ export class ChatService {
       return '';
     }
 
-    // OR 조건으로 키워드 검색
     const searchConditions = keywords.map((keyword) => ({
       OR: [
         { title: { contains: keyword, mode: 'insensitive' as const } },
@@ -44,11 +55,8 @@ export class ChatService {
       ],
     }));
 
-    // 관련 기사 검색
     const articles = await this.prisma.article.findMany({
-      where: {
-        OR: searchConditions,
-      },
+      where: { OR: searchConditions },
       take: 3,
       orderBy: { createdAt: 'desc' },
       include: { magazine: true },
@@ -58,7 +66,11 @@ export class ChatService {
       return '';
     }
 
-    // 검색된 콘텐츠를 컨텍스트로 포맷팅
+    return this.formatContext(articles);
+  }
+
+  // 컨텍스트 포맷팅
+  private formatContext(articles: ArticleWithMagazine[]): string {
     const contextParts = articles.map((article) => {
       return `【${article.title}】
 카테고리: ${article.category}
