@@ -19,44 +19,35 @@ COPY frontend ./frontend
 # Build backend
 RUN cd backend && npx prisma generate && npm run build
 
-# Build frontend (empty API_URL = relative paths)
-ENV NEXT_PUBLIC_API_URL=
+# Build frontend
+ENV NEXT_PUBLIC_API_URL=/api
 RUN cd frontend && npm run build
 
-# Nginx config - reverse proxy for API
+# Nginx config - reverse proxy
 RUN echo 'server { \n\
     listen 10000; \n\
     \n\
-    location /articles { \n\
+    # API routes -> Backend \n\
+    location /api { \n\
         proxy_pass http://127.0.0.1:4000; \n\
         proxy_http_version 1.1; \n\
         proxy_set_header Host $host; \n\
         proxy_set_header X-Real-IP $remote_addr; \n\
-    } \n\
-    \n\
-    location /magazines { \n\
-        proxy_pass http://127.0.0.1:4000; \n\
-        proxy_http_version 1.1; \n\
-        proxy_set_header Host $host; \n\
-        proxy_set_header X-Real-IP $remote_addr; \n\
-    } \n\
-    \n\
-    location /chat { \n\
-        proxy_pass http://127.0.0.1:4000; \n\
-        proxy_http_version 1.1; \n\
-        proxy_set_header Host $host; \n\
-        proxy_set_header X-Real-IP $remote_addr; \n\
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; \n\
         proxy_set_header Connection ""; \n\
         proxy_buffering off; \n\
         proxy_cache off; \n\
+        proxy_read_timeout 86400; \n\
     } \n\
     \n\
+    # All other routes -> Frontend \n\
     location / { \n\
         proxy_pass http://127.0.0.1:3000; \n\
         proxy_http_version 1.1; \n\
         proxy_set_header Upgrade $http_upgrade; \n\
         proxy_set_header Connection "upgrade"; \n\
         proxy_set_header Host $host; \n\
+        proxy_set_header X-Real-IP $remote_addr; \n\
     } \n\
 }' > /etc/nginx/sites-available/default
 
@@ -96,7 +87,6 @@ stdout_logfile_maxbytes=0\n\
 stderr_logfile=/dev/stderr\n\
 stderr_logfile_maxbytes=0' > /etc/supervisor/conf.d/app.conf
 
-# Render uses port 10000 by default
 EXPOSE 10000
 
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/app.conf"]

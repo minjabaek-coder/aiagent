@@ -5,8 +5,11 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // API 접두사 설정
+  app.setGlobalPrefix('api');
+
   app.enableCors({
-    origin: ['http://localhost:3000', 'http://frontend:3000'],
+    origin: '*',
     credentials: true,
   });
 
