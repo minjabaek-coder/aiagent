@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Magazine {
+  id          Int       @id @default(autoincrement())
+  issue       Int       @unique
+  title       String
+  coverImage  String?
+  publishedAt DateTime  @default(now())
+  articles    Article[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Article {
+  id          Int       @id @default(autoincrement())
+  title       String
+  subtitle    String?
+  content     String
+  category    Category
+  imageUrl    String?
+  author      String?
+  magazineId  Int?
+  magazine    Magazine? @relation(fields: [magazineId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model ChatHistory {
+  id        Int      @id @default(autoincrement())
+  sessionId String
+  role      String
+  content   String
+  createdAt DateTime @default(now())
+}
+
+enum Category {
+  COVER_STORY
+  PERFORMANCE_REVIEW
+  EDITOR_PICK
+  INTERVIEW
+  EXHIBITION
+}
