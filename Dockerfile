@@ -1,6 +1,6 @@
 FROM node:20-slim
 
-RUN apt-get update && apt-get install -y openssl supervisor && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y openssl supervisor nginx && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -19,11 +19,48 @@ COPY frontend ./frontend
 # Build backend
 RUN cd backend && npx prisma generate && npm run build
 
-# Build frontend (API calls go to same host)
-ENV NEXT_PUBLIC_API_URL=http://localhost:4000
+# Build frontend (empty API_URL = relative paths)
+ENV NEXT_PUBLIC_API_URL=
 RUN cd frontend && npm run build
 
-# Supervisor config to run both services
+# Nginx config - reverse proxy for API
+RUN echo 'server { \n\
+    listen 10000; \n\
+    \n\
+    location /articles { \n\
+        proxy_pass http://127.0.0.1:4000; \n\
+        proxy_http_version 1.1; \n\
+        proxy_set_header Host $host; \n\
+        proxy_set_header X-Real-IP $remote_addr; \n\
+    } \n\
+    \n\
+    location /magazines { \n\
+        proxy_pass http://127.0.0.1:4000; \n\
+        proxy_http_version 1.1; \n\
+        proxy_set_header Host $host; \n\
+        proxy_set_header X-Real-IP $remote_addr; \n\
+    } \n\
+    \n\
+    location /chat { \n\
+        proxy_pass http://127.0.0.1:4000; \n\
+        proxy_http_version 1.1; \n\
+        proxy_set_header Host $host; \n\
+        proxy_set_header X-Real-IP $remote_addr; \n\
+        proxy_set_header Connection ""; \n\
+        proxy_buffering off; \n\
+        proxy_cache off; \n\
+    } \n\
+    \n\
+    location / { \n\
+        proxy_pass http://127.0.0.1:3000; \n\
+        proxy_http_version 1.1; \n\
+        proxy_set_header Upgrade $http_upgrade; \n\
+        proxy_set_header Connection "upgrade"; \n\
+        proxy_set_header Host $host; \n\
+    } \n\
+}' > /etc/nginx/sites-available/default
+
+# Supervisor config
 RUN mkdir -p /var/log/supervisor
 RUN echo '[supervisord]\n\
 nodaemon=true\n\
@@ -48,8 +85,18 @@ autorestart=true\n\
 stdout_logfile=/dev/stdout\n\
 stdout_logfile_maxbytes=0\n\
 stderr_logfile=/dev/stderr\n\
+stderr_logfile_maxbytes=0\n\
+\n\
+[program:nginx]\n\
+command=nginx -g "daemon off;"\n\
+autostart=true\n\
+autorestart=true\n\
+stdout_logfile=/dev/stdout\n\
+stdout_logfile_maxbytes=0\n\
+stderr_logfile=/dev/stderr\n\
 stderr_logfile_maxbytes=0' > /etc/supervisor/conf.d/app.conf
 
-EXPOSE 3000 4000
+# Render uses port 10000 by default
+EXPOSE 10000
 
 CMD ["supervisord", "-c", "/etc/supervisor/conf.d/app.conf"]
