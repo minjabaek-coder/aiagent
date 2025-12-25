@@ -38,16 +38,50 @@ export class ChatService {
 
   // RAG: 키워드 기반 검색
   private async searchRelevantContent(query: string): Promise<string> {
-    const keywords = query
-      .replace(/[?!.,。？！，．]/g, '')
-      .split(/\s+/)
+    console.log('[RAG] 검색 쿼리:', query);
+
+    // 문화예술 관련 키워드 매핑
+    const artKeywords: Record<string, string[]> = {
+      '오페라': ['오페라', '아리아', '성악', '베르디', '푸치니', '모차르트'],
+      '클래식': ['클래식', '교향곡', '협주곡', '베토벤', '모차르트', '바흐', '피아노'],
+      '발레': ['발레', '백조의 호수', '호두까기', '차이콥스키', '무용'],
+      '미술': ['미술', '그림', '화가', '전시', '갤러리', '인상주의', '현대미술'],
+      '뮤지컬': ['뮤지컬', '브로드웨이', '레미제라블', '오페라의 유령'],
+      '연극': ['연극', '셰익스피어', '햄릿', '무대', '배우'],
+    };
+
+    // 키워드 추출 (한국어 + 영어)
+    let keywords = query
+      .replace(/[?!.,。？！，．~@#$%^&*()]/g, '')
+      .split(/[\s,]+/)
       .filter((word) => word.length >= 2);
 
-    if (keywords.length === 0) {
-      return '';
+    // 관련 키워드 확장
+    const expandedKeywords = new Set(keywords);
+    for (const keyword of keywords) {
+      for (const [category, relatedWords] of Object.entries(artKeywords)) {
+        if (keyword.includes(category) || relatedWords.some(w => keyword.includes(w))) {
+          relatedWords.forEach(w => expandedKeywords.add(w));
+        }
+      }
     }
 
-    const searchConditions = keywords.map((keyword) => ({
+    const allKeywords = Array.from(expandedKeywords);
+    console.log('[RAG] 검색 키워드:', allKeywords);
+
+    if (allKeywords.length === 0) {
+      // 키워드가 없으면 최신 기사 3개 반환
+      const recentArticles = await this.prisma.article.findMany({
+        take: 3,
+        orderBy: { createdAt: 'desc' },
+        include: { magazine: true },
+      });
+      console.log('[RAG] 최신 기사 사용:', recentArticles.length);
+      return recentArticles.length > 0 ? this.formatContext(recentArticles) : '';
+    }
+
+    // OR 조건으로 검색
+    const searchConditions = allKeywords.map((keyword) => ({
       OR: [
         { title: { contains: keyword, mode: 'insensitive' as const } },
         { content: { contains: keyword, mode: 'insensitive' as const } },
@@ -57,13 +91,21 @@ export class ChatService {
 
     const articles = await this.prisma.article.findMany({
       where: { OR: searchConditions },
-      take: 3,
+      take: 5,
       orderBy: { createdAt: 'desc' },
       include: { magazine: true },
     });
 
+    console.log('[RAG] 검색 결과:', articles.length, '개 기사');
+
     if (articles.length === 0) {
-      return '';
+      // 검색 결과 없으면 최신 기사 반환
+      const recentArticles = await this.prisma.article.findMany({
+        take: 3,
+        orderBy: { createdAt: 'desc' },
+        include: { magazine: true },
+      });
+      return recentArticles.length > 0 ? this.formatContext(recentArticles) : '';
     }
 
     return this.formatContext(articles);
@@ -71,22 +113,25 @@ export class ChatService {
 
   // 컨텍스트 포맷팅
   private formatContext(articles: ArticleWithMagazine[]): string {
-    const contextParts = articles.map((article) => {
-      return `【${article.title}】
-카테고리: ${article.category}
-${article.subtitle ? `부제: ${article.subtitle}` : ''}
-작성자: ${article.author || '편집부'}
-내용: ${article.content.substring(0, 500)}${article.content.length > 500 ? '...' : ''}
-${article.magazine ? `출처: ${article.magazine.title} (${article.magazine.issue}호)` : ''}`;
+    const contextParts = articles.map((article, index) => {
+      return `[기사 ${index + 1}] ${article.title}
+- 카테고리: ${article.category}
+- 부제: ${article.subtitle || '없음'}
+- 작성자: ${article.author || '편집부'}
+- 출처: ${article.magazine ? `${article.magazine.title} ${article.magazine.issue}호` : '미지정'}
+- 내용: ${article.content}`;
     });
 
     return `
----
-[참고 자료 - 우리 매거진의 관련 기사]
-${contextParts.join('\n\n')}
----
 
-위 참고 자료가 있다면 이를 바탕으로 답변해주세요. 참고 자료를 인용할 때는 자연스럽게 "저희 매거진에서 다룬 내용에 따르면..." 등으로 언급해주세요.
+=== 참고 자료 (우리 매거진 기사) ===
+${contextParts.join('\n\n')}
+=== 참고 자료 끝 ===
+
+중요: 위 참고 자료의 내용을 적극 활용하여 답변하세요.
+- 관련 기사가 있다면 "저희 매거진에서 다룬 바에 따르면...", "OO호에서 소개한 내용으로는..." 등으로 자연스럽게 인용하세요.
+- 참고 자료의 구체적인 정보(작품명, 작가명, 날짜 등)를 포함하세요.
+- 참고 자료에 없는 내용은 일반 지식으로 보충하되, 추측은 피하세요.
 `;
   }
 
